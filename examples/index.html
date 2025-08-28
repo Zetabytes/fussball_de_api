@@ -77,6 +77,21 @@
             background-color: #cff4fc;
             color: #055160;
         }
+        .game-timeline {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-top: 8px;
+        }
+        .game-timeline .section-title {
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .game-timeline .no-events {
+            color: #6c757d;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -119,6 +134,7 @@
         const loader = document.getElementById('loader');
         const resultsContainer = document.getElementById('results-container');
         const errorContainer = document.getElementById('error-container');
+        let currentApiKey = "";
 
         // Event-Listener für den Button
         fetchButton.addEventListener('click', fetchClubData);
@@ -129,6 +145,7 @@
         async function fetchClubData() {
             const apiKey = apiKeyInput.value.trim();
             const clubId = clubIdInput.value.trim();
+            currentApiKey = apiKey;
 
             if (!apiKey || !clubId) {
                 showError('Bitte API-Key und Vereins-ID eingeben.');
@@ -198,6 +215,106 @@
                 `;
                 resultsContainer.appendChild(teamSection);
             });
+
+            // After all teams are rendered, attach handlers to load timelines on demand
+            attachTimelineHandlers(data);
+        }
+
+        /**
+         * Attaches click handlers to "Spielverlauf" buttons and loads timeline on demand.
+         * @param {object} data - The FullClubInfoResponse.
+         */
+        function attachTimelineHandlers(data) {
+            const buttons = document.querySelectorAll('.js-timeline-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const gameId = btn.getAttribute('data-game-id');
+                    const container = document.getElementById(`timeline-${gameId}`);
+                    if (!container) return;
+
+                    const isHidden = container.classList.contains('d-none');
+                    if (isHidden) {
+                        if (!container.dataset.loaded) {
+                            // Try to use preloaded data first
+                            const cachedGame = findGameById(data, gameId);
+                            if (cachedGame && cachedGame.match_events) {
+                                container.innerHTML = renderMatchEvents(cachedGame.match_events) ||
+                                    '<div class="no-events">Kein Spielverlauf verfügbar.</div>';
+                                container.dataset.loaded = '1';
+                            } else {
+                                // Fallback: fetch details from API
+                                container.innerHTML = '<span class="text-muted">Lade Spielverlauf...</span>';
+                                try {
+                                    const details = await fetchGameDetails(gameId);
+                                    if (details && details.match_events) {
+                                        container.innerHTML = renderMatchEvents(details.match_events) ||
+                                            '<div class="no-events">Kein Spielverlauf verfügbar.</div>';
+                                    } else {
+                                        container.innerHTML = '<div class="no-events">Kein Spielverlauf verfügbar.</div>';
+                                    }
+                                    container.dataset.loaded = '1';
+                                } catch (err) {
+                                    console.error('Fehler beim Laden des Spielverlaufs:', err);
+                                    container.innerHTML = '<div class="text-danger">Fehler beim Laden des Spielverlaufs.</div>';
+                                }
+                            }
+                        }
+                        container.classList.remove('d-none');
+                    } else {
+                        container.classList.add('d-none');
+                    }
+                });
+            });
+        }
+
+        /**
+         * Fetches detailed game data from the API to retrieve match timeline/events.
+         * @param {string} gameId
+         * @returns {Promise<object|null>}
+         */
+        async function fetchGameDetails(gameId) {
+            const apiUrl = `/api/game/${gameId}`;
+            const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'X-API-Key': currentApiKey,
+                    'Accept': 'application/json'
+                }
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(`API-Fehler: ${response.status} - ${err.detail || response.statusText}`);
+            }
+            return response.json();
+        }
+
+        /**
+         * Finds a game by ID inside the FullClubInfoResponse payload.
+         * @param {object} data
+         * @param {string} gameId
+         * @returns {object|null}
+         */
+        function findGameById(data, gameId) {
+            if (!data) return null;
+
+            const scanList = (arr) => Array.isArray(arr) ? arr.find(g => (g.id ?? g.game_id) === gameId) : null;
+
+            // Check club-level games if present in payload
+            const clubLevel =
+                scanList(data.club_next_games) ||
+                scanList(data.club_prev_games);
+            if (clubLevel) return clubLevel;
+
+            // Check team-level games
+            if (Array.isArray(data.teams)) {
+                for (const t of data.teams) {
+                    const found =
+                        scanList(t.next_games) ||
+                        scanList(t.prev_games);
+                    if (found) return found;
+                }
+            }
+            return null;
         }
 
         /**
@@ -252,20 +369,76 @@
          * @returns {string} - HTML string with formatted events
          */
         function renderMatchEvents(matchEvents) {
+            // No events
             if (!matchEvents) return '';
-            const sections = [];
-            ["first-half", "second-half"].forEach(half => {
-                const halfData = matchEvents[half];
-                if (halfData && halfData.events && halfData.events.length > 0) {
-                    const eventsHtml = halfData.events.map(evt => `
-                        <span class="game-event ${evt.type}">
-                            ${evt.time}' ${evt.type} (${evt.team})
-                        </span>
-                    `).join('');
-                    sections.push(`<div><strong>${half.replace('-', ' ')}:</strong> ${eventsHtml}</div>`);
+
+            // Case 1: Flat list of events (Array)
+            if (Array.isArray(matchEvents)) {
+                if (matchEvents.length === 0) {
+                    return '<div class="game-timeline no-events">Kein Spielverlauf verfügbar.</div>';
                 }
-            });
-            return `<div class="game-events">${sections.join('')}</div>`;
+                const eventsHtml = matchEvents.map(evt => {
+                    const t = (evt.type || '').toLowerCase().replace(/\s+/g, '-');
+                    const typeClass =
+                        t.includes('goal') ? 'goal' :
+                        t.includes('yellow') ? 'yellow-card' :
+                        t.includes('red') ? 'red-card' :
+                        t.includes('sub') ? 'substitute' : 'secondary';
+
+                    const minute = evt.time != null ? `${evt.time}` : '';
+                    const team = evt.team ? ` (${evt.team})` : '';
+                    const desc = evt.description ? ` - ${evt.description}` : '';
+
+                    return `<span class="game-event ${typeClass}">
+                        ${minute} ${evt.type || 'Ereignis'}${team}${desc}
+                    </span>`;
+                }).join('');
+                return `<div class="game-timeline">${eventsHtml}</div>`;
+            }
+
+            // Case 2: Sectioned object (first-half, second-half, etc.)
+            if (typeof matchEvents === 'object') {
+                const sections = [];
+                const halves = [
+                    { key: 'first-half', label: '1. Halbzeit' },
+                    { key: 'second-half', label: '2. Halbzeit' },
+                    { key: 'extra-time', label: 'Verlängerung' },
+                    { key: 'penalties', label: 'Elfmeterschießen' }
+                ];
+
+                halves.forEach(({ key, label }) => {
+                    const halfData = matchEvents[key];
+                    // Support both { events: [...] } and direct arrays
+                    const events = Array.isArray(halfData?.events) ? halfData.events :
+                                   Array.isArray(halfData) ? halfData : [];
+                    if (events.length > 0) {
+                        const eventsHtml = events.map(evt => {
+                            const t = (evt.type || '').toLowerCase().replace(/\s+/g, '-');
+                            const typeClass =
+                                t.includes('goal') ? 'goal' :
+                                t.includes('yellow') ? 'yellow-card' :
+                                t.includes('red') ? 'red-card' :
+                                t.includes('sub') ? 'substitute' : 'secondary';
+
+                            const minute = evt.time != null ? `${evt.time}` : '';
+                            const team = evt.team ? ` (${evt.team})` : '';
+                            const desc = evt.description ? ` - ${evt.description}` : '';
+
+                            return `<span class="game-event ${typeClass}">
+                                ${minute} ${evt.type || 'Ereignis'}${team}${desc}
+                            </span>`;
+                        }).join('');
+                        sections.push(`<div><span class="section-title">${label}:</span> ${eventsHtml}</div>`);
+                    }
+                });
+
+                if (sections.length === 0) {
+                    return '<div class="game-timeline no-events">Kein Spielverlauf verfügbar.</div>';
+                }
+                return `<div class="game-timeline">${sections.join('')}</div>`;
+            }
+
+            return '';
         }
 
         /**
@@ -279,7 +452,19 @@
                 return `<h3>${title}</h3><p>Keine Spiele vorhanden.</p>`;
             }
 
-            const gameItems = games.map(game => `
+            const gameItems = games.map(game => {
+                const gid = (game.id ?? game.game_id) || null;
+
+                const timelineControls = gid ? `
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary mt-2 js-timeline-btn"
+                                data-game-id="${gid}">
+                            Spielverlauf
+                        </button>
+                        <div id="timeline-${gid}" class="game-timeline d-none"></div>
+                    ` : '';
+
+                return `
                 <li class="list-group-item game-list-item">
                     <div>
                         <div class="fw-bold game-teams">
@@ -290,18 +475,20 @@
                             ${game.away_team}
                         </div>
                         <div class="text-muted small mt-1">${new Date(game.datetime_utc).toLocaleString("de-DE")}</div>
+                        ${timelineControls}
                     </div>
                     <div class="text-end">
                         <span class="badge bg-primary rounded-pill fs-6">${
-                            game.home_score && game.away_score
+                            (game.home_score !== null && game.home_score !== undefined) &&
+                            (game.away_score !== null && game.away_score !== undefined)
                                 ? `${game.home_score} : ${game.away_score}`
                                 : "vs"
                         }</span>
                         ${game.location ? `<div class="game-venue mt-1">${game.location}</div>` : ''}
-                        ${renderMatchEvents(game.match_events)}
                     </div>
                 </li>
-            `).join('');
+                `;
+            }).join('');
 
             return `
                 <h3 class="mt-4 mt-lg-0">${title}</h3>

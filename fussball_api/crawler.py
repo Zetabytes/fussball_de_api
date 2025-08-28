@@ -298,9 +298,14 @@ async def _get_games(url: str, cache_key: str) -> List[Game]:
             location = None
             location_url = None
             game_details_url = None
+            game_id: Optional[str] = None
             game_details_link_tag = score_cell.find("a")
             if game_details_link_tag and game_details_link_tag.has_attr("href"):
                 game_details_url = f"{game_details_link_tag['href']}"
+                try:
+                    game_id = game_details_url.strip("/").split("/")[-1]
+                except Exception:
+                    game_id = None
                 logger.debug(f"Fetching game details from: {game_details_url}")
 
                 details_response = await asyncio.to_thread(fetch_url, game_details_url)
@@ -349,16 +354,17 @@ async def _get_games(url: str, cache_key: str) -> List[Game]:
                 parts = decoded_score.split(":", 1)
                 home_score, away_score = parts[0].strip() or None, parts[1].strip() or None
 
-            match_events = []
-            # Extract game ID from details link
-            if game_details_url:
+            match_events: List[MatchEvent] = []
+            if game_id:
                 try:
-                    game_id = game_details_url.strip("/").split("/")[-1]
                     match_events = await _get_match_course(game_id)
                 except Exception as e:
                     logger.warning(f"Could not fetch match course for {game_details_url}: {e}")
 
+            # Ensure we always have a game ID; fall back to a deterministic composite ID
+            fallback_id = game_id or f"{current_date_info.get('datetime_utc')}_{home_team_name}_vs_{away_team_name}"
             game = Game(
+                id=fallback_id,
                 **current_date_info,
                 home_team=home_team_name,
                 home_logo=home_team_logo,
@@ -798,6 +804,7 @@ async def get_game_by_id(game_id: str) -> Optional[Game]:
     match_events = await _get_match_course(game_id)
 
     return Game(
+        id=game_id,
         datetime_utc=datetime.now(timezone.utc),
         competition="Unknown",
         home_team=home_team_name,

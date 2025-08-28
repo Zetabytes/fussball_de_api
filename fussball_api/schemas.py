@@ -164,6 +164,7 @@ class Game(BaseModel):
     """
     Represents a single game.
 
+    :ivar id: The unique game id on fussball.de.
     :ivar datetime_utc: The date and time of the game in UTC.
     :ivar competition: The competition or league name.
     :ivar age_group: The age group for the game (e.g., "Herren").
@@ -178,6 +179,7 @@ class Game(BaseModel):
     :ivar location_url: The URL to the location on Google Maps.
     """
 
+    id: str
     datetime_utc: datetime
     competition: str
     age_group: Optional[str] = None

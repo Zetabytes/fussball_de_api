@@ -463,6 +463,22 @@ async def read_game_by_id(game_id: str):
     :return: The Game object with details and match events.
     :raises HTTPException: If the game could not be fetched or parsed.
     """
+    from .cache import club_info_cache
+
+    # Try to serve from prewarmed object cache first
+    for club_id, cached in club_info_cache.items():
+        # Club-level games
+        for g in cached.club_next_games + cached.club_prev_games:
+            if g.id == game_id:
+                logger.debug(f"Serving game {game_id} from object cache (club-level)")
+                return g
+        # Team-level games
+        for team in cached.teams:
+            for g in team.next_games + team.prev_games:
+                if g.id == game_id:
+                    logger.debug(f"Serving game {game_id} from object cache (team-level)")
+                    return g
+
     game = await get_game_by_id(game_id)
     if not game:
         raise HTTPException(

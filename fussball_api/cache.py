@@ -226,9 +226,20 @@ def save_caches_to_file():
     Uses flush + fsync to ensure data is written fully to disk.
     """
     try:
+        # Only persist the prewarmed club (if configured), to avoid storing arbitrary clubs
+        target_id = settings.PREWARM_CLUB_ID
+        if target_id:
+            filtered_cache = {
+                target_id: model.model_dump()
+                for cid, model in club_info_cache.items()
+                if cid == target_id
+            }
+        else:
+            filtered_cache = {}
+
         data = {
             "redirects": {url: entry.final_url for url, entry in http_cache.items()},
-            "club_info_cache": club_info_cache,
+            "club_info_cache": filtered_cache,
         }
         with open(CACHE_DUMP_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -286,7 +297,28 @@ def load_caches_from_file():
                 except Exception as e:
                     logger.error(f"Failed to restore cache entry for {url}: {e}")
 
-        club_info_cache.update(data.get("club_info_cache", {}))
-        logger.info(f"Loaded caches from {CACHE_DUMP_FILE}")
+        from .schemas import FullClubInfoResponse
+        loaded: Dict[str, FullClubInfoResponse] = {}
+        for club_id, payload in data.get("club_info_cache", {}).items():
+            try:
+                loaded[club_id] = FullClubInfoResponse(**payload)
+            except Exception as e:
+                logger.error(f"Failed to restore club_info_cache for {club_id}: {e}")
+
+        target_id = settings.PREWARM_CLUB_ID
+        if target_id:
+            # Keep only the prewarmed club in RAM
+            filtered = {target_id: loaded[target_id]} if target_id in loaded else {}
+            club_info_cache.clear()
+            club_info_cache.update(filtered)
+            logger.info(
+                "Loaded prewarmed club_info_cache for %s (entries: %d)",
+                target_id,
+                len(filtered),
+            )
+        else:
+            # No prewarm configured -> avoid keeping any club cache in RAM
+            club_info_cache.clear()
+            logger.info("No PREWARM_CLUB_ID set; cleared club_info_cache on load.")
     except Exception as e:
         logger.error(f"Failed to load caches: {e}")
