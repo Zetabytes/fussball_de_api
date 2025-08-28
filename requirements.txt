@@ -1,0 +1,12 @@
+fastapi==0.116.*
+uvicorn[standard]==0.35.*
+httpx==0.28.*
+beautifulsoup4==4.13.*
+lxml==6.0.*
+cachetools==6.1.*
+pydantic-settings==2.10.*
+Pillow==11.*
+fonttools==4.59.*
+tzdata==2025.2
+pytest==8.4.*
+pytest-asyncio==1.1.*

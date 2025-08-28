@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fussball.de API - Vereinsdaten-Beispiel</title>
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 20px;
+        }
+        .team-section {
+            margin-bottom: 3rem;
+            padding: 1.5rem;
+            border: 1px solid #dee2e6;
+            border-radius: .5rem;
+        }
+        .team-logo {
+            width: auto;
+            height: 48px;
+            max-width: 48px;
+            max-height: 48px;
+            object-fit: contain;
+            margin-right: 8px;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+        }
+        .table-team-logo {
+            width: auto;
+            height: 32px;
+            max-width: 32px;
+            max-height: 32px;
+            object-fit: contain;
+            margin-right: 6px;
+        }
+        .table-responsive {
+            max-height: 500px;
+        }
+        .game-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .game-teams {
+            flex-grow: 1;
+        }
+        .game-venue {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-align: right;
+        }
+        .game-events {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .game-event {
+            padding: 2px 4px;
+            margin-right: 4px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .game-event.goal {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        .game-event.yellow-card {
+            background-color: #fff3cd;
+            color: #664d03;
+        }
+        .game-event.red-card {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+        .game-event.substitute {
+            background-color: #cff4fc;
+            color: #055160;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="mb-4">Fussball.de API - Vereinsdaten</h1>
+        <p>Dieses Beispiel ruft alle Informationen für einen bestimmten Verein über den <code>/api/club/{club_id}</code> Endpunkt ab und zeigt sie an.</p>
+
+        <div class="row g-3 align-items-end mb-4">
+            <div class="col-md-4">
+                <label for="apiKey" class="form-label">API Key (X-API-Key)</label>
+                <input type="password" class="form-control" id="apiKey" placeholder="Dein API-Key">
+            </div>
+            <div class="col-md-4">
+                <label for="clubId" class="form-label">Vereins-ID</label>
+                <input type="text" class="form-control" id="clubId" placeholder="z.B. 00ES8GN91400004CVV0AG08LVUPGND5I">
+            </div>
+            <div class="col-md-4">
+                <button id="fetchButton" class="btn btn-primary w-100">Vereinsdaten abrufen</button>
+            </div>
+        </div>
+
+        <div id="loader" class="d-none text-center my-5">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Laden...</span>
+            </div>
+        </div>
+
+        <div id="error-container" class="alert alert-danger d-none" role="alert"></div>
+        <div id="results-container"></div>
+    </div>
+
+    <!-- Bootstrap 5.3 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // DOM-Elemente
+        const apiKeyInput = document.getElementById('apiKey');
+        const clubIdInput = document.getElementById('clubId');
+        const fetchButton = document.getElementById('fetchButton');
+        const loader = document.getElementById('loader');
+        const resultsContainer = document.getElementById('results-container');
+        const errorContainer = document.getElementById('error-container');
+
+        // Event-Listener für den Button
+        fetchButton.addEventListener('click', fetchClubData);
+
+        /**
+         * Fetches the complete club data from the API.
+         */
+        async function fetchClubData() {
+            const apiKey = apiKeyInput.value.trim();
+            const clubId = clubIdInput.value.trim();
+
+            if (!apiKey || !clubId) {
+                showError('Bitte API-Key und Vereins-ID eingeben.');
+                return;
+            }
+
+            // UI zurücksetzen
+            loader.classList.remove('d-none');
+            resultsContainer.innerHTML = '';
+            errorContainer.classList.add('d-none');
+
+            try {
+                // API-URL relativ zum aktuellen Host.
+                // Funktioniert, wenn die API auf demselben Host/Port läuft.
+                // Für die lokale Entwicklung ist dies http://127.0.0.1:8000
+                const apiUrl = `/api/club/${clubId}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'X-API-Key': apiKey,
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API-Fehler: ${response.status} - ${errorData.detail || response.statusText}`);
+                }
+
+                const data = await response.json();
+                renderData(data);
+
+            } catch (error) {
+                console.error('Fehler beim Abrufen der Daten:', error);
+                showError(error.message);
+            } finally {
+                loader.classList.add('d-none');
+            }
+        }
+
+        /**
+         * Renders the fetched data into the results container.
+         * @param {object} data - The API response data (FullClubInfoResponse).
+         */
+        function renderData(data) {
+            if (!data.teams || data.teams.length === 0) {
+                resultsContainer.innerHTML = '<p>Für diesen Verein wurden keine Mannschaften gefunden.</p>';
+                return;
+            }
+
+            data.teams.forEach(team => {
+                const teamSection = document.createElement('div');
+                teamSection.className = 'team-section';
+                teamSection.innerHTML = `
+                    <h2>${team.name}</h2>
+                    <hr>
+                    <div class="row">
+                        <div class="col-lg-6 mb-4">
+                            ${renderTable(team.table)}
+                        </div>
+                        <div class="col-lg-6">
+                            ${renderGames('Nächste Spiele', team.next_games)}
+                            ${renderGames('Letzte Spiele', team.prev_games)}
+                        </div>
+                    </div>
+                `;
+                resultsContainer.appendChild(teamSection);
+            });
+        }
+
+        /**
+         * Creates HTML for a league table.
+         * @param {object|null} table - The table object from the API.
+         * @returns {string} HTML string for the table.
+         */
+        function renderTable(table) {
+            if (!table || !table.entries || table.entries.length === 0) {
+                return '<h3>Tabelle</h3><p>Keine Tabelle verfügbar.</p>';
+            }
+
+            const tableRows = table.entries.map(entry => `
+                <tr>
+                    <td>${entry.place}</td>
+                    <td>
+                        <img src="${entry.img}" alt="Logo" class="table-team-logo">
+                        ${entry.team}
+                    </td>
+                    <td>${entry.games}</td>
+                    <td>${entry.points}</td>
+                    <td>${entry.goal}</td>
+                    <td>${entry.goal_difference}</td>
+                </tr>
+            `).join('');
+
+            return `
+                <h3>Tabelle</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Mannschaft</th>
+                                <th>Sp.</th>
+                                <th>Pkt.</th>
+                                <th>Tore</th>
+                                <th>Diff.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        /**
+         * Renders the timeline (events) of a game.
+         * @param {object} matchEvents - The match_events object from the API
+         * @returns {string} - HTML string with formatted events
+         */
+        function renderMatchEvents(matchEvents) {
+            if (!matchEvents) return '';
+            const sections = [];
+            ["first-half", "second-half"].forEach(half => {
+                const halfData = matchEvents[half];
+                if (halfData && halfData.events && halfData.events.length > 0) {
+                    const eventsHtml = halfData.events.map(evt => `
+                        <span class="game-event ${evt.type}">
+                            ${evt.time}' ${evt.type} (${evt.team})
+                        </span>
+                    `).join('');
+                    sections.push(`<div><strong>${half.replace('-', ' ')}:</strong> ${eventsHtml}</div>`);
+                }
+            });
+            return `<div class="game-events">${sections.join('')}</div>`;
+        }
+
+        /**
+         * Creates HTML for a list of games.
+         * @param {string} title - The title for the game list (e.g., "Nächste Spiele").
+         * @param {Array<object>} games - The list of game objects.
+         * @returns {string} HTML string for the game list.
+         */
+        function renderGames(title, games) {
+            if (!games || games.length === 0) {
+                return `<h3>${title}</h3><p>Keine Spiele vorhanden.</p>`;
+            }
+
+            const gameItems = games.map(game => `
+                <li class="list-group-item game-list-item">
+                    <div>
+                        <div class="fw-bold game-teams">
+                            <img src="${game.home_logo}" alt="Heim" class="team-logo">
+                            ${game.home_team}
+                            <br>
+                            <img src="${game.away_logo}" alt="Auswärts" class="team-logo">
+                            ${game.away_team}
+                        </div>
+                        <div class="text-muted small mt-1">${new Date(game.datetime_utc).toLocaleString("de-DE")}</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-primary rounded-pill fs-6">${
+                            game.home_score && game.away_score
+                                ? `${game.home_score} : ${game.away_score}`
+                                : "vs"
+                        }</span>
+                        ${game.location ? `<div class="game-venue mt-1">${game.location}</div>` : ''}
+                        ${renderMatchEvents(game.match_events)}
+                    </div>
+                </li>
+            `).join('');
+
+            return `
+                <h3 class="mt-4 mt-lg-0">${title}</h3>
+                <ul class="list-group">
+                    ${gameItems}
+                </ul>
+            `;
+        }
+
+        /**
+         * Displays an error message in the error container.
+         * @param {string} message - The error message to display.
+         */
+        function showError(message) {
+            errorContainer.textContent = message;
+            errorContainer.classList.remove('d-none');
+        }
+    </script>
+
+</body>
+</html>
