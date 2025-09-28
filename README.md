@@ -104,6 +104,8 @@ Hinweise zur Authentifizierung:
 
 - Build und Start:
   ```bash
+  cp docker-compose.example.yml docker-compose.yml
+  # Pass die docker-compose.yml an deine Umgebung an.
   docker compose up --build
   ```
 

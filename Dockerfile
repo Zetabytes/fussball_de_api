@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application's code from the host to the container at /app
 COPY ./fussball_api /app/fussball_api
+COPY ./examples /app/examples
 
 # Expose port 8000 to the outside world
 EXPOSE 8000

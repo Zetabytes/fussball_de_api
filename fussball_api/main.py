@@ -49,7 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/examples", StaticFiles(directory="../examples"), name="examples")
+app.mount("/examples", StaticFiles(directory="./examples"), name="examples")
 
 
 async def prewarm_cache():
