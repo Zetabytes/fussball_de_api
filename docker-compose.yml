@@ -6,4 +6,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ./fussball_api:/app/fussball_api
+      - ./data/cache:/app/cache
