@@ -393,6 +393,66 @@ async def test_get_match_course_parses_events(mock_fetch):
 
 
 @pytest.mark.asyncio
+@patch("fussball_api.crawler.fetch_url")
+async def test_get_match_course_assigns_half(mock_fetch):
+    """Tests that events get their half from the enclosing section and halftime/final whistle are emitted."""
+    html = """
+    <div id="match_course_body">
+      <div class="match-course">
+        <div class="first-half ingame">
+            <div class="row-event event-right">
+                <div class="column-time"><div class="valign-inner">30’</div></div>
+            </div>
+            <div class="row-time">30'</div>
+        </div>
+        <div class="second-half ingame">
+            <div class="row-event event-left">
+                <div class="column-time"><div class="valign-inner">31’</div></div>
+            </div>
+            <div class="row-event event-left">
+                <div class="column-time"><div class="valign-inner">
+                    60
+                    &rsquo;
+                    <div>+1</div>
+                </div></div>
+            </div>
+            <div class="row-time">60'</div>
+        </div>
+        <div class="final">
+            <div class="headline"><h3>Abpfiff</h3><span>11:40Uhr</span></div>
+        </div>
+      </div>
+    </div>
+    """
+    mock_fetch.return_value = FetchedResponse(
+        url="u", status_code=200, headers={}, content=html.encode("utf-8"), text=html
+    )
+
+    from fussball_api.crawler import _get_match_course
+
+    events = await _get_match_course("testgame")
+
+    assert [(ev.time, ev.type, ev.half) for ev in events] == [
+        ("30’", "unknown", 1),
+        ("30’", "halftime", 1),
+        ("31’", "unknown", 2),
+        ("60+1’", "unknown", 2),
+        ("60’", "final-whistle", 2),
+    ]
+    assert events[1].team is None
+    assert events[-1].description == "Abpfiff 11:40 Uhr"
+
+
+def test_parse_duration():
+    from bs4 import BeautifulSoup
+    from fussball_api.crawler import _parse_duration
+
+    html = """<div data-match-events="{'durationSections': 2,'duration': 60,'extraTimeDuration': 0,'first-half': {'start': 0,'end': 30,'events': []}}"></div>"""
+    assert _parse_duration(BeautifulSoup(html, "lxml")) == 60
+    assert _parse_duration(BeautifulSoup("<html></html>", "lxml")) is None
+
+
+@pytest.mark.asyncio
 @patch("fussball_api.crawler._get_font_mapping", new_callable=AsyncMock)
 async def test_deobfuscate_player_name(mock_get_font_mapping):
     """Tests that obfuscated player names are decoded via font mapping."""

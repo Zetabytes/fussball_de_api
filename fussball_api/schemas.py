@@ -131,15 +131,17 @@ class MatchEvent(BaseModel):
     Represents a single event in a match course.
 
     :ivar time: Minute of the event (string, e.g., '43’' or '90+1’').
-    :ivar type: Type of the event (goal, yellow-card, substitution, etc.).
-    :ivar side: 'home' or 'away', indicating which team the event belongs to.
+    :ivar type: Type of the event (goal, yellow-card, substitution, halftime, final-whistle, etc.).
+    :ivar team: 'home' or 'away', indicating which team the event belongs to. None for halftime and final-whistle.
+    :ivar half: The half the event occurred in (1 or 2), if known.
     :ivar description: Optional description such as "Gelbe Karte", "Auswechslung".
     :ivar score: Optional score at that point in match, if displayed.
     """
 
     time: str
     type: str
-    team: str
+    team: Optional[str] = None
+    half: Optional[int] = None
     description: Optional[str] = None
     score: Optional[str] = None
 
@@ -177,6 +179,7 @@ class Game(BaseModel):
     :ivar away_score: The score of the away team (for past games).
     :ivar location: The location of the game.
     :ivar location_url: The URL to the location on Google Maps.
+    :ivar duration: Regular playing time in minutes (e.g. 60 for D-Jugend). Only available for played games.
     """
 
     id: str
@@ -192,6 +195,7 @@ class Game(BaseModel):
     away_score: Optional[str] = None
     location: Optional[str] = None
     location_url: Optional[str] = None
+    duration: Optional[int] = None
     match_events: Optional[List[MatchEvent]] = None
 
 

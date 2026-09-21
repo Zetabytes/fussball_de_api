@@ -298,6 +298,7 @@ async def _get_games(url: str, cache_key: str) -> List[Game]:
 
             location = None
             location_url = None
+            duration = None
             game_details_url = None
             game_id: Optional[str] = None
             game_details_link_tag = score_cell.find("a")
@@ -322,19 +323,7 @@ async def _get_games(url: str, cache_key: str) -> List[Game]:
                             location = location.replace("Rasenplatz, ", "")
                             logger.debug(f"Found location: {location}")
 
-                        # Extract match events JSON if available
-                        events_container = details_soup.find("div", id="rangescontainer")
-                        match_events = None
-                        if events_container and events_container.has_attr("data-match-events"):
-                            raw_events = events_container["data-match-events"]
-                            try:
-                                import json
-                                events_json = json.loads(raw_events.replace("'", '"'))
-                                match_events = events_json
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to parse match events JSON for {game_details_url}: {e}"
-                                )
+                    duration = _parse_duration(details_soup)
                 elif details_response:
                     logger.warning(
                         f"Failed to fetch game details from {game_details_url}, "
@@ -376,6 +365,7 @@ async def _get_games(url: str, cache_key: str) -> List[Game]:
                 away_score=away_score,
                 location=location,
                 location_url=location_url,
+                duration=duration,
                 match_events=match_events,
             )
             games.append(game)
@@ -639,6 +629,52 @@ async def _get_player_name_from_profile(profile_url: str) -> Optional[str]:
     return None
 
 
+def _parse_duration(details_soup: BeautifulSoup) -> Optional[int]:
+    """
+    Extracts the regular playing time in minutes from a game details page.
+    fussball.de only embeds it (in data-match-events) once a match report exists.
+
+    :param details_soup: Parsed game details page.
+    :return: The duration in minutes (e.g. 60 for D-Jugend), or None if not available.
+    """
+    container = details_soup.find(attrs={"data-match-events": True})
+    if not container:
+        return None
+    match = re.search(r"'duration':\s*(\d+)", container["data-match-events"])
+    return int(match.group(1)) if match else None
+
+
+_HALF_CLASSES = {"first-half": 1, "second-half": 2}
+
+
+def _get_event_half(row) -> Optional[int]:
+    """
+    Determines the half (1 or 2) of a match course event from its enclosing section.
+
+    :param row: The .row-event tag.
+    :return: 1 or 2, or None if the event is not inside a known half section.
+    """
+    for parent in row.parents:
+        for css_class in parent.get("class", []) or []:
+            if css_class in _HALF_CLASSES:
+                return _HALF_CLASSES[css_class]
+    return None
+
+
+def _normalize_minute(text: str) -> str:
+    """
+    Normalizes a match minute from the match course to the form "43’" or "90+1’".
+    Event rows render stoppage time as "60’" + "<div>+1</div>", half end markers use "30'".
+
+    :param text: The raw minute text.
+    :return: The normalized minute.
+    """
+    minute = re.sub(r"\s+", "", text).replace("'", "’")
+    if "’+" in minute:
+        minute = minute.replace("’+", "+") + "’"
+    return minute
+
+
 async def _get_match_course(game_id: str) -> List[MatchEvent]:
     """
     Fetches and parses the detailed match course for a given game ID.
@@ -656,12 +692,39 @@ async def _get_match_course(game_id: str) -> List[MatchEvent]:
     soup = BeautifulSoup(html_content, "lxml")
 
     events: List[MatchEvent] = []
+    last_section_end: Optional[str] = None
 
-    for row in soup.select("#match_course_body .row-event"):
-        side = "home" if "event-left" in row.get("class", []) else "away"
+    # Select events, half end markers and the final whistle together to keep document order
+    for row in soup.select(
+        "#match_course_body .row-event, #match_course_body .row-time, #match_course_body .final"
+    ):
+        classes = row.get("class", [])
+
+        if "row-time" in classes:
+            last_section_end = _normalize_minute(row.get_text())
+            if _get_event_half(row) == 1:
+                events.append(
+                    MatchEvent(time=last_section_end, type="halftime", half=1, description="Halbzeit")
+                )
+            continue
+
+        if "final" in classes:
+            final_time_tag = row.find("span")
+            final_time = final_time_tag.get_text(strip=True).replace("Uhr", " Uhr") if final_time_tag else None
+            events.append(
+                MatchEvent(
+                    time=last_section_end or "",
+                    type="final-whistle",
+                    half=2 if last_section_end else None,
+                    description=f"Abpfiff {final_time}" if final_time else "Abpfiff",
+                )
+            )
+            continue
+
+        side = "home" if "event-left" in classes else "away"
 
         time_tag = row.select_one(".column-time .valign-inner")
-        time_text = time_tag.get_text(strip=True) if time_tag else None
+        time_text = _normalize_minute(time_tag.get_text()) if time_tag else None
 
         ev_type = "unknown"
         score = None
@@ -713,6 +776,7 @@ async def _get_match_course(game_id: str) -> List[MatchEvent]:
                 time=time_text or "",
                 type=ev_type,
                 team=side,
+                half=_get_event_half(row),
                 description=desc,
                 score=score,
             )
@@ -817,5 +881,6 @@ async def get_game_by_id(game_id: str) -> Optional[Game]:
         away_score=away_score,
         location=location,
         location_url=location_url,
+        duration=_parse_duration(details_soup),
         match_events=match_events,
     )
