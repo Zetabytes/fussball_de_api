@@ -256,10 +256,7 @@ async def test_get_font_mapping(mock_fetch, mock_ttfont):
 
     # Mock the font parsing library
     mock_font_instance = MagicMock()
-    mock_cmap = {
-        0x61: "one", 0x62: "two", 0x3A: "hyphen", 0x99: "unknown",
-        0xE001: "K", 0xE002: "adieresis", 0xE003: "uni00DF", 0xE004: "space",
-    }
+    mock_cmap = {0x61: "one", 0x62: "two", 0x3A: "hyphen"}
     mock_font_instance.getBestCmap.return_value = mock_cmap
     mock_ttfont.return_value = mock_font_instance
 
@@ -267,12 +264,32 @@ async def test_get_font_mapping(mock_fetch, mock_ttfont):
     mapping = await _get_font_mapping("test-font")
 
     # Assert
-    assert mapping == {
-        "61": "1", "62": "2", "3a": ":",
-        "e001": "K", "e002": "ä", "e003": "ß", "e004": " ",
-    }
+    assert mapping == {"61": "1", "62": "2", "3a": ":"}
     mock_fetch.assert_called_once()
     mock_ttfont.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("fussball_api.crawler.ttLib.TTFont")
+@patch("fussball_api.crawler.fetch_url")
+async def test_get_font_mapping_name_font(mock_fetch, mock_ttfont):
+    """Tests that name fonts map all glyphs and keep hyphens (e.g. in double names)."""
+    mock_fetch.return_value = FetchedResponse(
+        url="u", status_code=200, headers={}, content=b"woff-content", text=None
+    )
+    mock_font_instance = MagicMock()
+    mock_font_instance.getBestCmap.return_value = {
+        0xE001: "K", 0xE002: "adieresis", 0xE003: "uni00DF", 0xE004: "space",
+        0xE005: "hyphen", 0xE006: "colon", 0xE007: "one", 0xE008: "unknown",
+    }
+    mock_ttfont.return_value = mock_font_instance
+
+    mapping = await _get_font_mapping("name-font")
+
+    assert mapping == {
+        "e001": "K", "e002": "ä", "e003": "ß", "e004": " ",
+        "e005": "-", "e006": ":", "e007": "1",
+    }
 
 
 @pytest.mark.asyncio
@@ -675,6 +692,12 @@ async def test_get_game_lineup(mock_fetch, mock_get_font_mapping, mock_profile):
               <div class="player-name"><span class="firstname" data-obfuscation="f">\ue002</span><span class="lastname" data-obfuscation="f">\ue003</span></div>
               <span class="player-number">15</span>
             </a>
+            <a class="player-wrapper home" href="#">
+              <div class="player-name"><span class="firstname"></span><span class="lastname">k.A.</span></div>
+              <span class="player-number">22</span>
+              <div class="captain"><span class="c">C</span></div>
+              <div class="goal-keeper"><span class="k">T</span></div>
+            </a>
           </div>
         </div>
         <div class="trainer club-wrapper">
@@ -703,7 +726,9 @@ async def test_get_game_lineup(mock_fetch, mock_get_font_mapping, mock_profile):
     assert keeper.profile_url.endswith("/P1")
     captain = lineup.away.starting[0]
     assert (captain.name, captain.number, captain.is_goalkeeper, captain.is_captain) == ("Ko Max", 10, False, True)
-    assert [(p.name, p.number) for p in lineup.home.substitutes] == [("a x", 15)]
+    assert [(p.name, p.number) for p in lineup.home.substitutes] == [("a x", 15), (None, 22)]
+    anonymous = lineup.home.substitutes[1]
+    assert (anonymous.profile_url, anonymous.is_goalkeeper, anonymous.is_captain) == (None, True, True)
     assert lineup.home.coaches == []
     assert lineup.away.coaches == ["Max Ko"]
     mock_profile.assert_not_called()

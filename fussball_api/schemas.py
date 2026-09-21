@@ -203,7 +203,7 @@ class LineupPlayer(BaseModel):
     """
     Represents a player in a game lineup.
 
-    :ivar name: The player's name.
+    :ivar name: The player's name. None if not published (shown as "k.A." on fussball.de).
     :ivar number: The jersey number.
     :ivar is_goalkeeper: Indicates if the player is the goalkeeper (marked "T").
     :ivar is_captain: Indicates if the player is the captain (marked "C").

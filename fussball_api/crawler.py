@@ -49,7 +49,8 @@ def normalize_logo_url(url: str) -> str:
     return re.sub(r"format/\d+", "format/9", url)
 
 
-# Glyph names whose meaning differs from the Adobe Glyph List, used for score deobfuscation.
+# Glyphs of score fonts. These fonts only contain digits and draw the score separator
+# with the "hyphen" glyph, while name fonts use "hyphen" for real hyphens.
 _FONT_DIGIT_MAPPING = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
@@ -93,9 +94,10 @@ async def _get_font_mapping(font_name: str) -> Dict[str, str]:
             return {}
 
         mapping = {}
+        is_score_font = set(cmap.values()) <= _FONT_DIGIT_MAPPING.keys()
         for code, name in cmap.items():
             # Glyph names are the real characters ("K", "adieresis", "uni00DF", ...)
-            char = _FONT_DIGIT_MAPPING.get(name) or agl.toUnicode(name)
+            char = _FONT_DIGIT_MAPPING.get(name) if is_score_font else agl.toUnicode(name)
             if char:
                 mapping[f"{code:x}"] = char
 
@@ -931,12 +933,15 @@ async def _parse_lineup_player(wrapper) -> LineupPlayer:
     Parses a single .player-wrapper entry of a lineup.
 
     :param wrapper: The .player-wrapper tag (<a> for players with a profile).
-    :return: A LineupPlayer object.
+    :return: A LineupPlayer object. name and profile_url are None if the name is not published.
     """
     number_tag = wrapper.select_one(".player-number")
     number_text = number_tag.get_text(strip=True) if number_tag else ""
-    markers = {tag.get_text(strip=True) for tag in wrapper.select(".captain .c")}
-    profile_url = wrapper.get("href")
+    # The goalkeeper "T" is either in .captain or in its own .goal-keeper element
+    markers = {tag.get_text(strip=True) for tag in wrapper.select(".captain .c, .goal-keeper .k")}
+    # Players without a published name (shown as "k.A.") link to "#"
+    href = wrapper.get("href")
+    profile_url = href if href and "spielerprofil" in href else None
 
     name = await _deobfuscate_name(wrapper.select_one(".player-name"))
     if not name and profile_url:
