@@ -230,7 +230,7 @@ def save_caches_to_file():
         target_id = settings.PREWARM_CLUB_ID
         if target_id:
             filtered_cache = {
-                target_id: model.model_dump()
+                target_id: model.model_dump(mode="json")
                 for cid, model in club_info_cache.items()
                 if cid == target_id
             }
