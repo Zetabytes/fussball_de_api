@@ -17,6 +17,7 @@ from .crawler import (
     get_team_table,
     search_clubs,
     get_game_by_id,
+    get_game_lineup,
 )
 from .logging_config import setup_logging
 from .schemas import (
@@ -24,6 +25,7 @@ from .schemas import (
     ClubSearchResult,
     FullClubInfoResponse,
     Game,
+    Lineup,
     Table,
     Team,
     TeamInfoResponse,
@@ -486,3 +488,25 @@ async def read_game_by_id(game_id: str):
             detail=f"Game {game_id} not found or could not be parsed.",
         )
     return game
+
+
+@app.get(
+    "/api/game/{game_id}/lineup",
+    response_model=Lineup,
+    dependencies=[Depends(get_api_key)],
+)
+async def read_game_lineup(game_id: str):
+    """
+    Retrieves the lineups (starting eleven, substitutes, coaches) of both teams for a single game.
+
+    :param game_id: The unique game ID from fussball.de.
+    :return: The Lineup object.
+    :raises HTTPException: If no lineup is published or it could not be parsed.
+    """
+    lineup = await get_game_lineup(game_id)
+    if not lineup:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No lineup found for game {game_id}.",
+        )
+    return lineup

@@ -199,6 +199,52 @@ class Game(BaseModel):
     match_events: Optional[List[MatchEvent]] = None
 
 
+class LineupPlayer(BaseModel):
+    """
+    Represents a player in a game lineup.
+
+    :ivar name: The player's name.
+    :ivar number: The jersey number.
+    :ivar is_goalkeeper: Indicates if the player is the goalkeeper (marked "T").
+    :ivar is_captain: Indicates if the player is the captain (marked "C").
+    :ivar profile_url: The URL to the player's profile on fussball.de.
+    """
+
+    name: Optional[str] = None
+    number: Optional[int] = None
+    is_goalkeeper: bool = False
+    is_captain: bool = False
+    profile_url: Optional[str] = None
+
+
+class TeamLineup(BaseModel):
+    """
+    Represents the lineup of one team in a game.
+
+    :ivar team: The team name.
+    :ivar starting: The starting eleven.
+    :ivar substitutes: The players on the bench.
+    :ivar coaches: The names of the coaches.
+    """
+
+    team: str
+    starting: List[LineupPlayer] = []
+    substitutes: List[LineupPlayer] = []
+    coaches: List[str] = []
+
+
+class Lineup(BaseModel):
+    """
+    Represents the lineups of both teams in a game.
+
+    :ivar home: The lineup of the home team.
+    :ivar away: The lineup of the away team.
+    """
+
+    home: TeamLineup
+    away: TeamLineup
+
+
 class ClubInfoResponse(BaseModel):
     """
     Response model for the combined club info endpoint.

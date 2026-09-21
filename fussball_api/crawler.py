@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
-from fontTools import ttLib
+from fontTools import agl, ttLib
 
 from .cache import (
     HttpCacheEntry,
@@ -19,7 +19,17 @@ from .cache import (
 )
 from .config import settings
 from .logo_proxy import download_and_rewrite_logo
-from .schemas import ClubSearchResult, Game, Table, TableEntry, Team, MatchEvent
+from .schemas import (
+    ClubSearchResult,
+    Game,
+    Lineup,
+    LineupPlayer,
+    MatchEvent,
+    Table,
+    TableEntry,
+    Team,
+    TeamLineup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +49,7 @@ def normalize_logo_url(url: str) -> str:
     return re.sub(r"format/\d+", "format/9", url)
 
 
-# Mapping from font names to digit values, used for score deobfuscation.
+# Glyph names whose meaning differs from the Adobe Glyph List, used for score deobfuscation.
 _FONT_DIGIT_MAPPING = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
@@ -52,10 +62,10 @@ async def _get_font_mapping(font_name: str) -> Dict[str, str]:
     Retrieves or creates a deobfuscation mapping for a given font.
 
     Downloads a .woff font file from fussball.de, parses it to extract
-    the character-to-digit mapping, and caches the result.
+    the character mapping from the glyph names, and caches the result.
 
     :param font_name: The name of the font (e.g., 'score-font-12345').
-    :return: A dictionary mapping hex character codes to digit strings.
+    :return: A dictionary mapping hex character codes to the real characters.
     """
     entry: Optional[HttpCacheEntry] = http_cache.get(f"font:{font_name}")
     if entry:
@@ -84,15 +94,10 @@ async def _get_font_mapping(font_name: str) -> Dict[str, str]:
 
         mapping = {}
         for code, name in cmap.items():
-            hex_code = f"{code:x}"
-            digit = _FONT_DIGIT_MAPPING.get(name)
-            if digit:
-                mapping[hex_code] = digit
-            elif name.lower().startswith("uni"):
-                # Map Private Use Area glyphs like "uniE675" directly by hex code
-                uni_hex = name[3:]
-                if uni_hex:
-                    mapping[hex_code] = mapping.get(hex_code) or ""
+            # Glyph names are the real characters ("K", "adieresis", "uni00DF", ...)
+            char = _FONT_DIGIT_MAPPING.get(name) or agl.toUnicode(name)
+            if char:
+                mapping[f"{code:x}"] = char
 
         http_cache[f"font:{font_name}"] = HttpCacheEntry(
             url=font_url,
@@ -185,6 +190,41 @@ async def _deobfuscate_all(parent_tag) -> str:
                     parts.append(stripped)
 
     return "".join(parts).strip()
+
+
+def _is_obfuscated(text: str) -> bool:
+    return any("\uE000" <= c <= "\uF8FF" for c in text)
+
+
+async def _deobfuscate_name(tag) -> Optional[str]:
+    """
+    Decodes a name split over several obfuscated spans (e.g. firstname/lastname).
+
+    :param tag: The tag containing the <span data-obfuscation="..."> elements.
+    :return: The decoded name, or None if it could not be decoded.
+    """
+    if not tag:
+        return None
+    parts = []
+    for span in tag.find_all("span", attrs={"data-obfuscation": True}):
+        decoded = await _deobfuscate_text(span)
+        if decoded:
+            parts.append(decoded)
+    name = " ".join(" ".join(parts).split())
+    if not name or _is_obfuscated(name):
+        return None
+    return name
+
+
+async def _get_player_name(link_tag) -> Optional[str]:
+    """
+    Gets a player's name from a link to their profile. Decodes the obfuscated name
+    in the link and only loads the profile page if that fails.
+
+    :param link_tag: The <a href=".../spielerprofil/..."> tag.
+    :return: The player's name or None.
+    """
+    return await _deobfuscate_name(link_tag) or await _get_player_name_from_profile(link_tag["href"])
 
 
 async def _get_games(url: str, cache_key: str) -> List[Game]:
@@ -754,7 +794,7 @@ async def _get_match_course(game_id: str) -> List[MatchEvent]:
                 names = []
                 for link in links:
                     if "spielerprofil" in link["href"]:
-                        real_name = await _get_player_name_from_profile(link["href"])
+                        real_name = await _get_player_name(link)
                         if real_name:
                             names.append(real_name)
                 if len(names) == 2:
@@ -767,7 +807,7 @@ async def _get_match_course(game_id: str) -> List[MatchEvent]:
             if txt_tag:
                 profile_link = txt_tag.find("a", href=True)
                 if profile_link and "spielerprofil" in profile_link["href"]:
-                    desc = await _get_player_name_from_profile(profile_link["href"])
+                    desc = await _get_player_name(profile_link)
                 else:
                     desc = await _deobfuscate_all(txt_tag)
 
@@ -884,3 +924,75 @@ async def get_game_by_id(game_id: str) -> Optional[Game]:
         duration=_parse_duration(details_soup),
         match_events=match_events,
     )
+
+
+async def _parse_lineup_player(wrapper) -> LineupPlayer:
+    """
+    Parses a single .player-wrapper entry of a lineup.
+
+    :param wrapper: The .player-wrapper tag (<a> for players with a profile).
+    :return: A LineupPlayer object.
+    """
+    number_tag = wrapper.select_one(".player-number")
+    number_text = number_tag.get_text(strip=True) if number_tag else ""
+    markers = {tag.get_text(strip=True) for tag in wrapper.select(".captain .c")}
+    profile_url = wrapper.get("href")
+
+    name = await _deobfuscate_name(wrapper.select_one(".player-name"))
+    if not name and profile_url:
+        name = await _get_player_name_from_profile(profile_url)
+
+    return LineupPlayer(
+        name=name,
+        number=int(number_text) if number_text.isdigit() else None,
+        is_goalkeeper="T" in markers,
+        is_captain="C" in markers,
+        profile_url=profile_url,
+    )
+
+
+async def get_game_lineup(game_id: str) -> Optional[Lineup]:
+    """
+    Crawls and parses the lineups (starting eleven, substitutes, coaches) of a game.
+
+    :param game_id: The fussball.de game ID.
+    :return: A Lineup object, or None if no lineup is published.
+    """
+    url = f"{FUSSBALL_DE_BASE_URL}/ajax.match.lineup/-/mode/PAGE/spiel/{game_id}"
+    response = await asyncio.to_thread(fetch_url, url)
+    if response is None or response.status_code != 200:
+        logger.warning(f"Failed to fetch lineup for game {game_id}")
+        return None
+
+    soup = BeautifulSoup(response.text or "", "lxml")
+    lineup_tag = soup.select_one(".match-lineup")
+    if not lineup_tag:
+        logger.info(f"No lineup available for game {game_id}")
+        return None
+
+    club_names = [tag.get_text(strip=True) for tag in lineup_tag.select(".head .club-name")]
+    if len(club_names) != 2:
+        logger.warning(f"Could not parse team names of lineup for game {game_id}")
+        return None
+    teams = {
+        "home": TeamLineup(team=club_names[0]),
+        "away": TeamLineup(team=club_names[1]),
+    }
+
+    for section in ("starting", "substitutes", "trainer"):
+        for wrapper in lineup_tag.select(f".{section} .player-wrapper"):
+            team = teams["home" if "home" in wrapper.get("class", []) else "away"]
+            if section == "trainer":
+                name = await _deobfuscate_name(wrapper.select_one(".player-name"))
+                if name:
+                    team.coaches.append(name)
+            elif section == "starting":
+                team.starting.append(await _parse_lineup_player(wrapper))
+            else:
+                team.substitutes.append(await _parse_lineup_player(wrapper))
+
+    if not any(team.starting or team.substitutes or team.coaches for team in teams.values()):
+        logger.info(f"Lineup for game {game_id} is empty")
+        return None
+
+    return Lineup(**teams)

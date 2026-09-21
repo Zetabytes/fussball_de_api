@@ -256,7 +256,10 @@ async def test_get_font_mapping(mock_fetch, mock_ttfont):
 
     # Mock the font parsing library
     mock_font_instance = MagicMock()
-    mock_cmap = {0x61: "one", 0x62: "two", 0x3A: "hyphen", 0x99: "unknown"}
+    mock_cmap = {
+        0x61: "one", 0x62: "two", 0x3A: "hyphen", 0x99: "unknown",
+        0xE001: "K", 0xE002: "adieresis", 0xE003: "uni00DF", 0xE004: "space",
+    }
     mock_font_instance.getBestCmap.return_value = mock_cmap
     mock_ttfont.return_value = mock_font_instance
 
@@ -264,7 +267,10 @@ async def test_get_font_mapping(mock_fetch, mock_ttfont):
     mapping = await _get_font_mapping("test-font")
 
     # Assert
-    assert mapping == {"61": "1", "62": "2", "3a": ":"}
+    assert mapping == {
+        "61": "1", "62": "2", "3a": ":",
+        "e001": "K", "e002": "ä", "e003": "ß", "e004": " ",
+    }
     mock_fetch.assert_called_once()
     mock_ttfont.assert_called_once()
 
@@ -629,3 +635,107 @@ async def test_search_clubs_no_results(monkeypatch):
     monkeypatch.setattr(crawler, "fetch_url", fake_fetch_sync)
     result = await crawler.search_clubs("abc")
     assert result == []
+
+
+_NAME_FONT = {"e001": "M", "e002": "a", "e003": "x", "e004": "K", "e005": "o", "e006": " "}
+
+
+@pytest.mark.asyncio
+@patch("fussball_api.crawler._get_player_name_from_profile", new_callable=AsyncMock)
+@patch("fussball_api.crawler._get_font_mapping", new_callable=AsyncMock)
+@patch("fussball_api.crawler.fetch_url")
+async def test_get_game_lineup(mock_fetch, mock_get_font_mapping, mock_profile):
+    """Tests that lineups are parsed and names are decoded without loading profiles."""
+    html = """
+    <div class="match-lineup">
+      <div class="field-wrapper"><div class="field"><div class="head container">
+        <div class="home"><div class="club-name"><a href="#">Heim</a></div></div>
+        <div class="away"><div class="club-name"><a href="#">Gast</a></div></div>
+      </div></div></div>
+      <div class="starting container"><div class="club-wrapper">
+        <div class="club">
+          <a class="player-wrapper home" href="https://www.fussball.de/spielerprofil/-/player-id/P1">
+            <div class="player-name"><span class="firstname" data-obfuscation="f">\ue001\ue002\ue003</span><span class="lastname" data-obfuscation="f">\ue004\ue005</span></div>
+            <span class="player-number">01</span>
+            <div class="captain"><span class="c">T</span></div>
+          </a>
+        </div>
+        <div class="club last">
+          <a class="player-wrapper away" href="https://www.fussball.de/spielerprofil/-/player-id/P2">
+            <div class="player-name"><span class="firstname" data-obfuscation="f">\ue004\ue005</span><span class="lastname" data-obfuscation="f">\ue001\ue002\ue003</span></div>
+            <span class="player-number">10</span>
+            <div class="captain"><span class="c">C</span></div>
+          </a>
+        </div>
+      </div></div>
+      <div class="extra-wrapper">
+        <div class="substitutes club-wrapper">
+          <div class="club">
+            <a class="player-wrapper home" href="https://www.fussball.de/spielerprofil/-/player-id/P3">
+              <div class="player-name"><span class="firstname" data-obfuscation="f">\ue002</span><span class="lastname" data-obfuscation="f">\ue003</span></div>
+              <span class="player-number">15</span>
+            </a>
+          </div>
+        </div>
+        <div class="trainer club-wrapper">
+          <div class="club last">
+            <div class="player-wrapper away">
+              <div class="player-name"><span class="firstname" data-obfuscation="f">\ue001\ue002\ue003\ue006\ue004\ue005</span><span class="lastname" data-obfuscation="f"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    mock_fetch.return_value = FetchedResponse(
+        url="u", status_code=200, headers={}, content=html.encode("utf-8"), text=html
+    )
+    mock_get_font_mapping.return_value = _NAME_FONT
+
+    from fussball_api.crawler import get_game_lineup
+
+    lineup = await get_game_lineup("game123")
+
+    assert lineup.home.team == "Heim"
+    assert lineup.away.team == "Gast"
+    keeper = lineup.home.starting[0]
+    assert (keeper.name, keeper.number, keeper.is_goalkeeper, keeper.is_captain) == ("Max Ko", 1, True, False)
+    assert keeper.profile_url.endswith("/P1")
+    captain = lineup.away.starting[0]
+    assert (captain.name, captain.number, captain.is_goalkeeper, captain.is_captain) == ("Ko Max", 10, False, True)
+    assert [(p.name, p.number) for p in lineup.home.substitutes] == [("a x", 15)]
+    assert lineup.home.coaches == []
+    assert lineup.away.coaches == ["Max Ko"]
+    mock_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("fussball_api.crawler.fetch_url")
+async def test_get_game_lineup_not_published(mock_fetch):
+    mock_fetch.return_value = FetchedResponse(url="u", status_code=200, headers={}, content=b"", text="")
+
+    from fussball_api.crawler import get_game_lineup
+
+    assert await get_game_lineup("game123") is None
+
+
+@pytest.mark.asyncio
+@patch("fussball_api.crawler._get_player_name_from_profile", new_callable=AsyncMock)
+@patch("fussball_api.crawler._get_font_mapping", new_callable=AsyncMock)
+async def test_get_player_name_falls_back_to_profile(mock_get_font_mapping, mock_profile):
+    """Goal scorers use a font without glyph names, so their names come from the profile."""
+    from bs4 import BeautifulSoup
+    from fussball_api.crawler import _get_player_name
+
+    html = """<a href="https://www.fussball.de/spielerprofil/-/player-id/P1"><div class="player-name"><span data-obfuscation="f">\ue001</span></div></a>"""
+    link = BeautifulSoup(html, "lxml").a
+
+    mock_get_font_mapping.return_value = _NAME_FONT
+    assert await _get_player_name(link) == "M"
+    mock_profile.assert_not_called()
+
+    mock_get_font_mapping.return_value = {"e001": "\ue6b7"}
+    mock_profile.return_value = "Rudi Arendsen"
+    assert await _get_player_name(link) == "Rudi Arendsen"
+    mock_profile.assert_called_once_with("https://www.fussball.de/spielerprofil/-/player-id/P1")
+
