@@ -180,6 +180,7 @@ class Game(BaseModel):
     :ivar location: The location of the game.
     :ivar location_url: The URL to the location on Google Maps.
     :ivar duration: Regular playing time in minutes (e.g. 60 for D-Jugend). Only available for played games.
+    :ivar attendance: Number of spectators reported for the game, if available.
     """
 
     id: str
@@ -196,6 +197,7 @@ class Game(BaseModel):
     location: Optional[str] = None
     location_url: Optional[str] = None
     duration: Optional[int] = None
+    attendance: Optional[int] = None
     match_events: Optional[List[MatchEvent]] = None
 
 

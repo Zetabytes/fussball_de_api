@@ -475,6 +475,20 @@ def test_parse_duration():
     assert _parse_duration(BeautifulSoup("<html></html>", "lxml")) is None
 
 
+def test_parse_attendance():
+    from bs4 import BeautifulSoup
+    from fussball_api.crawler import _parse_attendance
+
+    inline_html = "<li>Zuschauer: 11513</li>"
+    formatted_html = "<li><span>Zuschauer:</span><span>11.513</span></li>"
+    spaced_html = "<li>Zuschauer: 11 513</li>"
+
+    assert _parse_attendance(BeautifulSoup(inline_html, "lxml")) == 11513
+    assert _parse_attendance(BeautifulSoup(formatted_html, "lxml")) == 11513
+    assert _parse_attendance(BeautifulSoup(spaced_html, "lxml")) == 11513
+    assert _parse_attendance(BeautifulSoup("<html></html>", "lxml")) is None
+
+
 @pytest.mark.asyncio
 @patch("fussball_api.crawler._get_font_mapping", new_callable=AsyncMock)
 async def test_deobfuscate_player_name(mock_get_font_mapping):
@@ -624,6 +638,7 @@ async def test_get_game_by_id_team_logos_from_img(monkeypatch):
       <div class="team-home"><div class="team-name">A</div><img src="//a.png"></div>
       <div class="team-away"><div class="team-name">B</div><img src="//b.png"></div>
     </section>
+    <ul><li>Zuschauer: 11513</li></ul>
     """
     def fake_fetch_sync(*a, **k):
         return FetchedResponse(url="u", status_code=200, headers={}, content=html.encode("utf-8"), text=html)
@@ -631,6 +646,7 @@ async def test_get_game_by_id_team_logos_from_img(monkeypatch):
     game = await crawler.get_game_by_id("gid")
     assert game.home_logo.startswith("https://")
     assert game.away_logo.startswith("https://")
+    assert game.attendance == 11513
 
 
 @pytest.mark.asyncio

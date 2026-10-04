@@ -47,6 +47,7 @@ def _sample_game(idx: int = 1) -> Game:
         home_score=None,
         away_score=None,
         status=None,
+        attendance=1234,
         match_events=[],
     )
 
@@ -213,6 +214,7 @@ def test_read_game_by_id_endpoint_ok_and_404(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "get_game_by_id", fake_ok)
     ok = client.get("/api/game/G9")
     assert ok.status_code == 200
+    assert ok.json()["attendance"] == 1234
     monkeypatch.setattr(main, "get_game_by_id", fake_none)
     nf = client.get("/api/game/GNF")
     assert nf.status_code == 404

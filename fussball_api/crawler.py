@@ -686,6 +686,22 @@ def _parse_duration(details_soup: BeautifulSoup) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
+def _parse_attendance(details_soup: BeautifulSoup) -> Optional[int]:
+    """
+    Extracts the reported attendance from a game details page.
+
+    :param details_soup: Parsed game details page.
+    :return: The number of spectators, or None if not available.
+    """
+    page_text = details_soup.get_text(" ", strip=True)
+    match = re.search(r"Zuschauer\s*:\s*([0-9][0-9.\s\u00a0]*)", page_text)
+    if not match:
+        return None
+
+    digits = re.sub(r"\D", "", match.group(1))
+    return int(digits) if digits else None
+
+
 _HALF_CLASSES = {"first-half": 1, "second-half": 2}
 
 
@@ -924,6 +940,7 @@ async def get_game_by_id(game_id: str) -> Optional[Game]:
         location=location,
         location_url=location_url,
         duration=_parse_duration(details_soup),
+        attendance=_parse_attendance(details_soup),
         match_events=match_events,
     )
 
