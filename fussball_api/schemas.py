@@ -99,7 +99,9 @@ class TableEntry(BaseModel):
     :ivar goal_difference: The goal difference.
     :ivar points: The total points.
     :ivar is_promotion: Indicates if the team is in a promotion spot.
+    :ivar is_promotion_playoff: Indicates if the team is in a promotion playoff spot.
     :ivar is_relegation: Indicates if the team is in a relegation spot.
+    :ivar is_relegation_playoff: Indicates if the team is in a relegation playoff spot.
     """
 
     place: int
@@ -113,7 +115,9 @@ class TableEntry(BaseModel):
     goal_difference: int
     points: int
     is_promotion: bool = False
+    is_promotion_playoff: bool = False
     is_relegation: bool = False
+    is_relegation_playoff: bool = False
 
 
 class Table(BaseModel):

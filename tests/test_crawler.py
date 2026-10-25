@@ -48,7 +48,7 @@ def team_table_html():
     return """
     <table>
         <tr class="thead">...</tr>
-        <tr class="promotion">
+        <tr class="row-promotion">
             <td></td>
             <td>1.</td>
             <td><img src="//media.fussball.de/logo-1.png" /> <span class="club-name">Team One</span></td>
@@ -60,7 +60,7 @@ def team_table_html():
             <td>15</td>
             <td>25</td>
         </tr>
-        <tr class="relegation">
+        <tr class="row-relegation">
             <td></td>
             <td>2.</td>
             <td><img src="//media.fussball.de/logo-2.png" /> <span class="club-name">Team Two</span></td>
@@ -219,6 +219,8 @@ async def test_get_team_table(mock_fetch, team_table_html):
     assert entry1.points == 25
     assert entry1.is_promotion is True
     assert entry1.is_relegation is False
+    assert entry1.is_promotion_playoff is False
+    assert entry1.is_relegation_playoff is False
 
     entry2 = table.entries[1]
     assert entry2.place == 2
