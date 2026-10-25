@@ -549,8 +549,10 @@ async def get_team_table(team_id: str) -> Optional[Table]:
             continue
 
         row_classes = row.get("class", [])
-        is_promotion = "promotion" in row_classes
-        is_relegation = "relegation" in row_classes
+        is_promotion = "row-promotion" in row_classes
+        is_promotion_playoff = "row-promotion-playoff" in row_classes
+        is_relegation = "row-relegation" in row_classes
+        is_relegation_playoff = "row-relegation-playoff" in row_classes
 
         logo_tag = cols[2].find("img")
         logo_url = logo_tag["src"] if logo_tag else ""
@@ -571,7 +573,9 @@ async def get_team_table(team_id: str) -> Optional[Table]:
                 goal_difference=int(cols[8].get_text(strip=True)),
                 points=int(cols[9].get_text(strip=True)),
                 is_promotion=is_promotion,
+                is_promotion_playoff=is_promotion_playoff,
                 is_relegation=is_relegation,
+                is_relegation_playoff=is_relegation_playoff,
             )
             table_entries.append(entry)
         except (ValueError, IndexError, AttributeError) as e:
